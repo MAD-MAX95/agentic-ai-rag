@@ -1,13 +1,25 @@
-import requests
+import os
 import streamlit as st
 
+# Load Streamlit Cloud secrets into environment variables.
+# Locally, the existing .env file will continue to work.
+try:
+    if "GEMINI_API_KEY" in st.secrets:
+        os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
 
-API_URL = "http://127.0.0.1:8000/chat"
+    if "PINECONE_API_KEY" in st.secrets:
+        os.environ["PINECONE_API_KEY"] = st.secrets["PINECONE_API_KEY"]
+
+    if "PINECONE_INDEX_NAME" in st.secrets:
+        os.environ["PINECONE_INDEX_NAME"] = st.secrets["PINECONE_INDEX_NAME"]
+
+except Exception:
+    # When running locally, use the .env file instead.
+    pass
 
 
-# ------------------------------------------------------------
-# PAGE CONFIG
-# ------------------------------------------------------------
+from src.graph import graph
+
 
 st.set_page_config(
     page_title="Agentic AI RAG Assistant",
@@ -15,28 +27,20 @@ st.set_page_config(
     layout="wide",
 )
 
-
-# ------------------------------------------------------------
-# HEADER
-# ------------------------------------------------------------
-
 st.title("🤖 Agentic AI RAG Assistant")
 
 st.markdown(
     """
-    Ask questions about the **Agentic AI eBook**.
+Ask questions about the **Agentic AI eBook**.
 
-    This assistant retrieves relevant content from the eBook
-    using **Pinecone** and generates answers using **LangGraph + Gemini**.
-    """
+This assistant retrieves relevant content from the eBook
+using **Pinecone** and generates answers using
+**LangGraph + Gemini**.
+"""
 )
 
 st.divider()
 
-
-# ------------------------------------------------------------
-# QUESTION INPUT
-# ------------------------------------------------------------
 
 query = st.text_area(
     "Ask a question",
@@ -44,21 +48,12 @@ query = st.text_area(
     height=100,
 )
 
+ask_button = st.button("🔍 Ask Question", type="primary")
 
-ask_button = st.button(
-    "🔍 Ask Question",
-    type="primary",
-)
-
-
-# ------------------------------------------------------------
-# API CALL
-# ------------------------------------------------------------
 
 if ask_button:
 
     if not query.strip():
-
         st.warning("Please enter a question.")
 
     else:
@@ -66,63 +61,49 @@ if ask_button:
         with st.spinner("Searching the eBook and generating an answer..."):
 
             try:
-
-                response = requests.post(
-                    API_URL,
-                    json={"query": query},
-                    timeout=120,
+                result = graph.invoke(
+                    {
+                        "question": query,
+                        "context": [],
+                        "answer": "",
+                        "score": 0.0,
+                    }
                 )
 
-                response.raise_for_status()
-
-                data = response.json()
-
-            except requests.exceptions.ConnectionError:
-
-                st.error(
-                    "Could not connect to the FastAPI server. "
-                    "Make sure it is running with:\n\n"
-                    "`uvicorn app:app --reload`"
-                )
-
-            except requests.exceptions.RequestException as e:
-
-                st.error(f"API request failed: {e}")
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
 
             else:
 
-                # ------------------------------------------------
-                # ANSWER
-                # ------------------------------------------------
-
                 st.subheader("Answer")
 
-                st.write(data["final_answer"])
-
-
-                # ------------------------------------------------
-                # CONFIDENCE
-                # ------------------------------------------------
-
-                confidence = data["confidence_score"]
+                st.write(result["answer"])
 
                 st.subheader("Confidence")
 
+                confidence = result["score"]
+
                 st.progress(confidence)
 
-                st.write(f"**{confidence:.2f} ({confidence * 100:.0f}%)**")
-
-
-                # ------------------------------------------------
-                # RETRIEVED CONTEXT
-                # ------------------------------------------------
+                st.write(
+                    f"**{confidence:.2f} ({confidence * 100:.0f}%)**"
+                )
 
                 st.subheader("Retrieved Context")
 
-                chunks = data["retrieved_context_chunks"]
+                chunks = result["context"]
 
-                for i, chunk in enumerate(chunks, start=1):
+                if chunks:
 
-                    with st.expander(f"Context Chunk {i}"):
+                    for i, chunk in enumerate(chunks, start=1):
 
-                        st.text(chunk)
+                        with st.expander(
+                            f"Context Chunk {i}"
+                        ):
+                            st.text(chunk)
+
+                else:
+
+                    st.info(
+                        "No relevant context was retrieved from the eBook."
+                    )
